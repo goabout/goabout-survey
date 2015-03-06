@@ -10,3 +10,6 @@ client_id = SOME-ID-ISSUED-BY-GOABOUT
 client_secret = CORRESPONDING-CLIENT-SECRET
 user_email: admin-user@goabout.com
 user_password: even-more-top-secret
+
+[mandrill]
+key = KEY_FOR_MANDRILL_API
