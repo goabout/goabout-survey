@@ -1,0 +1,12 @@
+[gdrive]
+username: user@gmail.com
+password: top-secret
+spreadsheet_id: XYZ_123
+worksheet_id: asdf6
+
+[api]
+url = http://local.goabout.com:8080/api
+client_id = SOME-ID-ISSUED-BY-GOABOUT
+client_secret = CORRESPONDING-CLIENT-SECRET
+user_email: admin-user@goabout.com
+user_password: even-more-top-secret
