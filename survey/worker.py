@@ -6,16 +6,20 @@ import argparse
 import logging
 import os
 import sys
+from ConfigParser import ConfigParser
+from gettext import gettext
+from datetime import datetime
 
 import relations
-from gdata.spreadsheet.service import SpreadsheetsService
 from session import GoAboutSession, OAuth2Error, InsecureTransportError
+
+import mandrill
+from gdata.spreadsheet.service import SpreadsheetsService, CellQuery
+from gdata.spreadsheet import SpreadsheetsCellsFeed
+
 from requests.exceptions import HTTPError
 from util import confirm
 
-from ConfigParser import ConfigParser
-
-from gettext import gettext
 
 DEFAULT_CONFIG = '~/.goabout-survey.conf'
 
@@ -31,7 +35,65 @@ class ArgumentParser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         self.exit(1, gettext('%s: error: %s\n') % (self.prog, message))
 
-def import_data(session, google, args, config):
+
+def send_survey(google, mandrill_client, config):
+
+    spreadsheet_id = config.get('gdrive', 'spreadsheet_id')
+    worksheet_id = config.get('gdrive', 'worksheet_id')
+    spreadsheet = google.GetWorksheetsFeed(spreadsheet_id)
+    worksheet = google.GetListFeed(spreadsheet_id, worksheet_id)
+
+    query = CellQuery()
+    query.min_row = '1'
+    cells = google.GetCellsFeed(key=spreadsheet_id, wksht_id=worksheet_id, query=query)
+
+    logger.info('Google Spreadsheet: %s; tab: %s', spreadsheet.title.text,
+        cells.title.text)
+
+    for row in worksheet.entry:
+        try:
+            logger.info('Sending mail to %s', row.custom['email'].text)
+
+            if row.custom['status'].text:
+                logger.info(' -- SKIPPING; status = %s', row.custom['status'].text)
+                continue
+
+            row = google.UpdateRow(row, {'status': 'PROCESSING'})
+
+            message = { 'global_merge_vars':
+                        [
+                          { "name": "survey_url"
+                          , "content": row.custom['survey'].text
+                          }
+                        ]
+                      , 'merge': True
+                      , 'merge_language': 'mailchimp'
+                      , 'to':
+                        [
+                          { 'email':  row.custom['email'].text
+                          , 'type': 'to'
+                          }
+                        ],
+                      }
+
+            mandrill_client.messages.send_template(
+                    template_name='its-in-car-survey',
+                    template_content=None,
+                    message=message,
+                    async=False)
+
+            row = google.UpdateRow(row, {'status': 'DONE', 'send': "{}Z".format(datetime.utcnow().isoformat()), 'reason': ''})
+
+        except Exception as e:
+            logger.exception(e)
+            row = google.UpdateRow(row, {'status': 'ERROR', 'send': '', 'reason': str(e)})
+
+
+
+
+
+
+def import_data(session, google, config):
     users = list_users(session, config)
     spreadsheet_id = config.get('gdrive', 'spreadsheet_id')
     worksheet_id = config.get('gdrive', 'worksheet_id')
@@ -116,6 +178,8 @@ def connect_api(config):
 
     fail("Something went horridly wrong!")
 
+def connect_mandrill(config):
+    return mandrill.Mandrill(config.get('mandrill', 'key'))
 
 def parse_args(args=None):
     parser = ArgumentParser(
@@ -126,7 +190,7 @@ def parse_args(args=None):
     parser.add_argument('--import', metavar='DATA', dest='data',
             help='import url\'s from a datafile')
     parser.add_argument('--clear', dest='clear', action='store_true', help='remove data from the sheet')
-    parser.add_argument('--send', dest='send', help='Actually send the emails!')
+    parser.add_argument('--send', dest='send', action='store_true', help='Actually send the emails!')
 
     parser.add_argument('-q', '--quiet', dest='quiet', action='store_true',
             help='makes this command quiet, outputting only errors. This also mutes --debug.')
@@ -176,11 +240,19 @@ def main():
 
     session = connect_api(config)
     google = connect_google_drive(config)
+    mandrill = connect_mandrill(config)
 
-    if (args.data):
-        import_data(session, google, args, config)
     if (args.clear):
         clear(google, args, config)
+        return
+
+    if (args.data):
+        import_data(session, google, config)
+        return
+
+    if (args.send):
+        send_survey(google, mandrill, config)
+
 
     sys.exit(0)
 

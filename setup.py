@@ -23,6 +23,7 @@ setup(
         ],
     },
     install_requires = [
+        'mandrill',
         'dougrain',
         'requests',
         'gdata',
